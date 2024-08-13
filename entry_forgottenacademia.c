@@ -1,3 +1,22 @@
+bool almost_equal(float a, float b, float epsilon) {
+	return fabs(a - b) <= epsilon;
+}
+
+bool animate_f32_to_target(float* value, float target, float delta_t, float rate) {
+	*value += (target - *value) * (1.0f - pow(2.0f, -rate * delta_t));
+	if(almost_equal(*value, target, 0.001f)) {
+		*value = target;
+		return true;
+	}
+	return false;
+}
+
+bool animate_v2_to_target(Vector2* value, Vector2 target, float delta_t, float rate) {
+	bool xIsReached = animate_f32_to_target(&(value->x), target.x, delta_t, rate);
+	bool yIsReached = animate_f32_to_target(&(value->y), target.y, delta_t, rate);
+	return xIsReached && yIsReached;
+}
+
 typedef enum SpriteID {
 	SPRITE_NIL,
 	SPRITE_PLAYER,
@@ -82,8 +101,11 @@ int entry(int argc, char **argv) {
 	window.clear_color 		= hex_to_rgba(0x4f4263ff);
 
 	float64 last_time 		= os_get_current_time_in_seconds();
-	float64 seconds_count 	= 0.0;
+	float64 seconds_count 	= 0.0f;
 	int frame_count 		= 0;
+
+	float zoom 				= 3.0f;
+	Vector2 camera_pos		= v2(0.0f, 0.0f);
 
 	sprites[SPRITE_PLAYER] 		= (Sprite){ .image=load_image_from_disk(STR("player.png"), 		get_heap_allocator()), .size=v2(SPRITE_SIZE, SPRITE_SIZE) };
 	sprites[SPRITE_CIRCLE] 		= (Sprite){ .image=load_image_from_disk(STR("circle.png"), 		get_heap_allocator()), .size=v2(SPRITE_SIZE, SPRITE_SIZE) };
@@ -111,18 +133,18 @@ int entry(int argc, char **argv) {
 		reset_temporary_storage();
 		os_update(); 
 		gfx_update();
-
-		// :view
-		float zoom 				= 3;
-		draw_frame.projection 	= m4_make_orthographic_projection(window.width * -0.5, window.width * 0.5, window.height * -0.5, window.height * 0.5, -1, 10);
-		draw_frame.view 		= m4_scalar(1.0);
-		draw_frame.view 		= m4_mul(draw_frame.view, m4_make_translation(v3(player_entity->pos.x, player_entity->pos.y, 0)));
-		draw_frame.view 		= m4_mul(draw_frame.view, m4_make_scale(v3(1.0/zoom, 1.0/zoom, 1.0)));
-
+		
 		// :time
 		float64 now 	= os_get_current_time_in_seconds();
 		float64 delta_t	= now - last_time;
 		last_time 		= now;
+
+		// :view
+		animate_v2_to_target(&camera_pos, player_entity->pos, delta_t, 30.0f);
+		draw_frame.projection 	= m4_make_orthographic_projection(window.width * -0.5f, window.width * 0.5f, window.height * -0.5f, window.height * 0.5f, -1, 10);
+		draw_frame.view 		= m4_scalar(1.0);
+		draw_frame.view 		= m4_mul(draw_frame.view, m4_make_translation(v3(camera_pos.x, camera_pos.y, 0)));
+		draw_frame.view 		= m4_mul(draw_frame.view, m4_make_scale(v3(1.0f/zoom, 1.0f/zoom, 1.0f)));
 
 		// :rendering
 		for(int i = 0; i < MAX_ENTITY_PER_WORLD; i++) {
@@ -131,7 +153,7 @@ int entry(int argc, char **argv) {
 				Sprite* sprite		= get_sprite(entity->sprite_id);
 				Matrix4 xform		= m4_scalar(1.0);
 				xform				= m4_translate(xform, v3(entity->pos.x, entity->pos.y, 0));
-				xform				= m4_translate(xform, v3(sprite->size.x * -0.5, 0.0, 0));
+				xform				= m4_translate(xform, v3(sprite->size.x * -0.5f, 0.0f, 0));
 				draw_image_xform(sprite->image, xform, sprite->size, COLOR_WHITE);
 			}
 		}
@@ -143,16 +165,16 @@ int entry(int argc, char **argv) {
 
 		Vector2 input_axis = v2(0, 0);
 		if (is_key_down('Q')) {
-			input_axis.x -= 1.0;
+			input_axis.x -= 1.0f;
 		}
 		if (is_key_down('D')) {
-			input_axis.x += 1.0;
+			input_axis.x += 1.0f;
 		}
 		if (is_key_down('S')) {
-			input_axis.y -= 1.0;
+			input_axis.y -= 1.0f;
 		}
 		if (is_key_down('Z')) {
-			input_axis.y += 1.0;
+			input_axis.y += 1.0f;
 		}
 		input_axis = v2_normalize(input_axis);
 
@@ -161,9 +183,9 @@ int entry(int argc, char **argv) {
 		// :fps
 		seconds_count 	+= delta_t;
 		frame_count 	+= 1;
-		if (seconds_count > 1.0) {
+		if (seconds_count > 1.0f) {
 			log("fps: %i", frame_count);
-			seconds_count 	= 0.0;
+			seconds_count 	= 0.0f;
 			frame_count 	= 0;
 		}
 	}
