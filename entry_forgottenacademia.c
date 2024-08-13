@@ -98,13 +98,13 @@ int entry(int argc, char **argv) {
 	for(int i = 0; i < 10; i++) {
 		Entity* entity = entity_create();
 		setup_circle(entity);
-		entity->pos = v2(get_random_float32_in_range(-300, 300), get_random_float32_in_range(-200, 200));
+		entity->pos = v2(get_random_float32_in_range(-500, 500), get_random_float32_in_range(-500, 500));
 	}
 
 	for(int i = 0; i < 10; i++) {
 		Entity* entity = entity_create();
 		setup_skeleton(entity);
-		entity->pos = v2(get_random_float32_in_range(-300, 300), get_random_float32_in_range(-200, 200));
+		entity->pos = v2(get_random_float32_in_range(-500, 500), get_random_float32_in_range(-500, 500));
 	}
 
 	while (!window.should_close) {
@@ -115,7 +115,9 @@ int entry(int argc, char **argv) {
 		// :view
 		float zoom 				= 3;
 		draw_frame.projection 	= m4_make_orthographic_projection(window.width * -0.5, window.width * 0.5, window.height * -0.5, window.height * 0.5, -1, 10);
-		draw_frame.view 		= m4_make_scale(v3(1.0/zoom, 1.0/zoom, 1.0));
+		draw_frame.view 		= m4_scalar(1.0);
+		draw_frame.view 		= m4_mul(draw_frame.view, m4_make_translation(v3(player_entity->pos.x, player_entity->pos.y, 0)));
+		draw_frame.view 		= m4_mul(draw_frame.view, m4_make_scale(v3(1.0/zoom, 1.0/zoom, 1.0)));
 
 		// :time
 		float64 now 	= os_get_current_time_in_seconds();
@@ -154,7 +156,7 @@ int entry(int argc, char **argv) {
 		}
 		input_axis = v2_normalize(input_axis);
 
-		player_entity->pos = v2_add(player_entity->pos, v2_mulf(input_axis, 100 * delta_t));
+		player_entity->pos = v2_add(player_entity->pos, v2_mulf(input_axis, 128 * delta_t));
 
 		// :fps
 		seconds_count 	+= delta_t;
