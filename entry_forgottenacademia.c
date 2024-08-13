@@ -17,6 +17,36 @@ bool animate_v2_to_target(Vector2* value, Vector2 target, float delta_t, float r
 	return xIsReached && yIsReached;
 }
 
+Vector2 get_mouse_pos_in_world() {
+	float mouse_x = input_frame.mouse_x;
+	float mouse_y = input_frame.mouse_y;
+
+	float ndcX = (input_frame.mouse_x / window.width) * 2 - 1;
+	float ndcY = (input_frame.mouse_y / window.height) * 2 - 1;
+
+	Vector4 world_pos 	= v4(ndcX, ndcY, 0, 1);
+	world_pos			= m4_transform(m4_inverse(draw_frame.projection), world_pos);
+	world_pos			= m4_transform(draw_frame.view, world_pos);
+
+	return v2(world_pos.x, world_pos.y);
+}
+
+const float TILE_SIZE = 16.0f;
+int world_pos_to_tile_pos(float world_pos) {
+	return floor(world_pos / TILE_SIZE);
+}
+
+float tile_pos_to_world_pos(float tile_pos) {
+	return tile_pos * TILE_SIZE;
+}
+
+Vector2 round_v2_to_tile(Vector2 world_pos) {
+	world_pos.x = tile_pos_to_world_pos(world_pos_to_tile_pos(world_pos.x));
+	world_pos.y = tile_pos_to_world_pos(world_pos_to_tile_pos(world_pos.y));
+	return world_pos;
+}
+
+
 typedef enum SpriteID {
 	SPRITE_NIL,
 	SPRITE_PLAYER,
@@ -25,7 +55,7 @@ typedef enum SpriteID {
 	SPRITE_MAX
 } SpriteID;
 
-#define SPRITE_SIZE 16.0
+const float SPRITE_SIZE = 16.0f;
 typedef struct Sprite {
 	Gfx_Image* 	image;
 	Vector2 	size;
@@ -92,7 +122,6 @@ void setup_skeleton(Entity* entity) {
 }
 
 int entry(int argc, char **argv) {
-	
 	window.title 			= STR("Forgotten Academia");
 	window.scaled_width 	= 1280;
 	window.scaled_height 	= 720; 
@@ -121,12 +150,14 @@ int entry(int argc, char **argv) {
 		Entity* entity = entity_create();
 		setup_circle(entity);
 		entity->pos = v2(get_random_float32_in_range(-500, 500), get_random_float32_in_range(-500, 500));
+		entity->pos = round_v2_to_tile(entity->pos);
 	}
 
 	for(int i = 0; i < 10; i++) {
 		Entity* entity = entity_create();
 		setup_skeleton(entity);
 		entity->pos = v2(get_random_float32_in_range(-500, 500), get_random_float32_in_range(-500, 500));
+		entity->pos = round_v2_to_tile(entity->pos);
 	}
 
 	while (!window.should_close) {
@@ -147,13 +178,23 @@ int entry(int argc, char **argv) {
 		draw_frame.view 		= m4_mul(draw_frame.view, m4_make_scale(v3(1.0f/zoom, 1.0f/zoom, 1.0f)));
 
 		// :rendering
+		int tile_radius = 40;
+		int player_tile_x = world_pos_to_tile_pos(player_entity->pos.x);
+		int player_tile_y = world_pos_to_tile_pos(player_entity->pos.y);
+		for(int y = player_tile_y - tile_radius; y < player_tile_y + tile_radius; y++) {
+			for(int x = player_tile_x - tile_radius; x < player_tile_x + tile_radius; x++) {
+				if((y + x) % 2 == 0) {
+					draw_rect(v2(x * TILE_SIZE, y * TILE_SIZE), v2(TILE_SIZE, TILE_SIZE), hex_to_rgba(0x00000011));
+				}
+			}
+		}
+		
 		for(int i = 0; i < MAX_ENTITY_PER_WORLD; i++) {
 			Entity* entity = &world->entities[i];
 			if(entity->is_valid) {
 				Sprite* sprite		= get_sprite(entity->sprite_id);
 				Matrix4 xform		= m4_scalar(1.0);
 				xform				= m4_translate(xform, v3(entity->pos.x, entity->pos.y, 0));
-				xform				= m4_translate(xform, v3(sprite->size.x * -0.5f, 0.0f, 0));
 				draw_image_xform(sprite->image, xform, sprite->size, COLOR_WHITE);
 			}
 		}
@@ -177,8 +218,11 @@ int entry(int argc, char **argv) {
 			input_axis.y += 1.0f;
 		}
 		input_axis = v2_normalize(input_axis);
-
 		player_entity->pos = v2_add(player_entity->pos, v2_mulf(input_axis, 128 * delta_t));
+
+		Vector2 mouse_pos = get_mouse_pos_in_world();
+		Vector2 mouse_tile = round_v2_to_tile(mouse_pos);
+		draw_rect(mouse_tile, v2(TILE_SIZE, TILE_SIZE), hex_to_rgba(0xffffff11));
 
 		// :fps
 		seconds_count 	+= delta_t;
