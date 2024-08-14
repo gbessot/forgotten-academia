@@ -1,3 +1,7 @@
+const float SPRITE_SIZE = 16.0f;
+const float TILE_SIZE = 16.0f;
+const float HEALTH_SKELETON = 2.0f;
+
 bool almost_equal(float a, float b, float epsilon) {
 	return fabs(a - b) <= epsilon;
 }
@@ -9,6 +13,10 @@ bool animate_f32_to_target(float* value, float target, float delta_t, float rate
 		return true;
 	}
 	return false;
+}
+
+float sin_breathe(float time, float rate) {
+	return (sin(time * rate) + 1.0) / 2.0;
 }
 
 bool animate_v2_to_target(Vector2* value, Vector2 target, float delta_t, float rate) {
@@ -31,7 +39,6 @@ Vector2 get_mouse_pos_in_world() {
 	return v2(world_pos.x, world_pos.y);
 }
 
-const float TILE_SIZE = 16.0f;
 int world_pos_to_tile_pos(float world_pos) {
 	return floor(world_pos / TILE_SIZE);
 }
@@ -46,16 +53,15 @@ Vector2 round_v2_to_tile(Vector2 world_pos) {
 	return world_pos;
 }
 
-
 typedef enum SpriteID {
 	SPRITE_NIL,
 	SPRITE_PLAYER,
 	SPRITE_CIRCLE,
 	SPRITE_SKELETON,
+	SPRITE_BONE,
 	SPRITE_MAX
 } SpriteID;
 
-const float SPRITE_SIZE = 16.0f;
 typedef struct Sprite {
 	Gfx_Image* 	image;
 	Vector2 	size;
@@ -72,7 +78,8 @@ Sprite* get_sprite(SpriteID id) {
 typedef enum EntityType {
 	ENTITY_PLAYER,
 	ENTITY_CIRCLE,
-	ENTITY_SKELETON
+	ENTITY_SKELETON,
+	ENTITY_ITEM_BONE
 } EntityType;
 
 typedef struct Entity {
@@ -80,6 +87,9 @@ typedef struct Entity {
 	EntityType 	type;
 	SpriteID 	sprite_id;
 	Vector2 	pos;
+	int			health;
+	bool		is_destroyable;
+	bool		is_item;
 } Entity;
 
 #define MAX_ENTITY_PER_WORLD 1024
@@ -87,6 +97,11 @@ typedef struct World {
 	Entity entities[MAX_ENTITY_PER_WORLD];
 } World;
 World* world = NULL;
+
+typedef struct WorldFrame {
+	Entity* selected_entity;
+} WorldFrame;
+WorldFrame world_frame;
 
 Entity* entity_create() {
 	Entity* found_entity = NULL;
@@ -117,8 +132,16 @@ void setup_circle(Entity* entity) {
 }
 
 void setup_skeleton(Entity* entity) {
-	entity->type 		= ENTITY_SKELETON;
-	entity->sprite_id 	= SPRITE_SKELETON;
+	entity->type 			= ENTITY_SKELETON;
+	entity->sprite_id 		= SPRITE_SKELETON;
+	entity->is_destroyable	= true;
+	entity->health			= HEALTH_SKELETON;
+}
+
+void setup_bone(Entity* entity) {
+	entity->type 			= ENTITY_ITEM_BONE;
+	entity->sprite_id 		= SPRITE_BONE;
+	entity->is_item			= true;
 }
 
 int entry(int argc, char **argv) {
@@ -136,9 +159,10 @@ int entry(int argc, char **argv) {
 	float zoom 				= 3.0f;
 	Vector2 camera_pos		= v2(0.0f, 0.0f);
 
-	sprites[SPRITE_PLAYER] 		= (Sprite){ .image=load_image_from_disk(STR("player.png"), 		get_heap_allocator()), .size=v2(SPRITE_SIZE, SPRITE_SIZE) };
-	sprites[SPRITE_CIRCLE] 		= (Sprite){ .image=load_image_from_disk(STR("circle.png"), 		get_heap_allocator()), .size=v2(SPRITE_SIZE, SPRITE_SIZE) };
-	sprites[SPRITE_SKELETON]	= (Sprite){ .image=load_image_from_disk(STR("skeleton.png"), 	get_heap_allocator()), .size=v2(SPRITE_SIZE, SPRITE_SIZE) };
+	sprites[SPRITE_PLAYER] 		= (Sprite){ .image=load_image_from_disk(STR("res/sprites/player.png"), 		get_heap_allocator()), .size=v2(SPRITE_SIZE, SPRITE_SIZE) };
+	sprites[SPRITE_CIRCLE] 		= (Sprite){ .image=load_image_from_disk(STR("res/sprites/circle.png"), 		get_heap_allocator()), .size=v2(SPRITE_SIZE, SPRITE_SIZE) };
+	sprites[SPRITE_SKELETON]	= (Sprite){ .image=load_image_from_disk(STR("res/sprites/skeleton.png"), 	get_heap_allocator()), .size=v2(SPRITE_SIZE, SPRITE_SIZE) };
+	sprites[SPRITE_BONE]		= (Sprite){ .image=load_image_from_disk(STR("res/sprites/bone.png"), 		get_heap_allocator()), .size=v2(SPRITE_SIZE, SPRITE_SIZE) };
 
 	world = alloc(get_heap_allocator(), sizeof(World));
 	memset(world, 0, sizeof(World));
@@ -164,6 +188,8 @@ int entry(int argc, char **argv) {
 		reset_temporary_storage();
 		os_update(); 
 		gfx_update();
+
+		world_frame = (WorldFrame){0};
 		
 		// :time
 		float64 now 	= os_get_current_time_in_seconds();
@@ -178,6 +204,10 @@ int entry(int argc, char **argv) {
 		draw_frame.view 		= m4_mul(draw_frame.view, m4_make_scale(v3(1.0f/zoom, 1.0f/zoom, 1.0f)));
 
 		// :rendering
+		Vector2 mouse_pos = get_mouse_pos_in_world();
+		Vector2 mouse_tile = round_v2_to_tile(mouse_pos);
+		draw_rect(mouse_tile, v2(TILE_SIZE, TILE_SIZE), hex_to_rgba(0xffffff11));
+
 		int tile_radius = 40;
 		int player_tile_x = world_pos_to_tile_pos(player_entity->pos.x);
 		int player_tile_y = world_pos_to_tile_pos(player_entity->pos.y);
@@ -195,7 +225,16 @@ int entry(int argc, char **argv) {
 				Sprite* sprite		= get_sprite(entity->sprite_id);
 				Matrix4 xform		= m4_scalar(1.0);
 				xform				= m4_translate(xform, v3(entity->pos.x, entity->pos.y, 0));
+				if(entity->is_item) {
+					xform			= m4_translate(xform, v3(0, sin_breathe(os_get_current_time_in_seconds(), 8.0), 0));
+				}
 				draw_image_xform(sprite->image, xform, sprite->size, COLOR_WHITE);
+
+				float dist = v2_length(v2_sub(v2(entity->pos.x + TILE_SIZE / 2, entity->pos.y + TILE_SIZE / 2), mouse_pos));
+				if(entity->is_destroyable && dist < 8) {
+					world_frame.selected_entity = entity;
+					draw_rect(entity->pos, sprite->size, v4(1.0, 1.0, 0.0, 0.5));
+				}
 			}
 		}
 
@@ -220,9 +259,25 @@ int entry(int argc, char **argv) {
 		input_axis = v2_normalize(input_axis);
 		player_entity->pos = v2_add(player_entity->pos, v2_mulf(input_axis, 128 * delta_t));
 
-		Vector2 mouse_pos = get_mouse_pos_in_world();
-		Vector2 mouse_tile = round_v2_to_tile(mouse_pos);
-		draw_rect(mouse_tile, v2(TILE_SIZE, TILE_SIZE), hex_to_rgba(0xffffff11));
+		if (is_key_just_pressed(MOUSE_BUTTON_LEFT)) {
+			consume_key_just_pressed(MOUSE_BUTTON_LEFT);
+			Entity* selected_entity = world_frame.selected_entity;
+			if (selected_entity) {
+				selected_entity->health--;
+				if(selected_entity->health <= 0) {
+					switch (selected_entity->type) {
+						case (ENTITY_SKELETON):
+							Entity* bone = entity_create();
+							setup_bone(bone);
+							bone->pos = selected_entity->pos;
+							break;
+						default:
+							break;
+					}
+					entity_destroy(selected_entity);
+				}
+			}
+		}
 
 		// :fps
 		seconds_count 	+= delta_t;
